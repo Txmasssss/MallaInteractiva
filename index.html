@@ -28,7 +28,7 @@
         }
 
         body { 
-            font-family: 'Inter', comic-sans; 
+            font-family: 'Inter', sans-serif; 
             background-color: var(--color-bg);
             color: var(--color-text-primary);
             transition: background-color 0.3s, color 0.3s;
@@ -70,6 +70,21 @@
             animation: spin 1s linear infinite;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .global-notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            color: white;
+            z-index: 100;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+        }
+        .global-notification.show {
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -129,6 +144,9 @@
 
     <div id="course-modal" class="modal-backdrop hidden">
         <div class="rounded-xl shadow-2xl p-6 md:p-8 w-11/12 md:w-3/4 lg:w-2/3 max-w-4xl" style="background-color: var(--color-surface); color: var(--color-text-primary);">
+            <div id="modal-message-area" class="hidden p-3 mb-4 text-sm rounded-lg" role="alert">
+                <span class="font-medium"></span> <span id="modal-message-text"></span>
+            </div>
             <h2 id="modal-title" class="text-2xl font-bold mb-6"></h2>
             <form id="course-form" class="space-y-6">
                 <input type="hidden" id="course-id-hidden">
@@ -460,7 +478,7 @@
         card.appendChild(name);
         card.appendChild(details);
 
-        if (course.state === 'available' || course.state === 'approved' || course.state === 'failed') {
+        if (course.state !== 'locked') {
             card.addEventListener('dblclick', () => toggleApproved(course.id));
         }
         
@@ -512,17 +530,26 @@
         const course = careerData.courses.find(c => c.id === courseId);
         if (!course) return;
 
-        // If it's approved or failed, revert it to available
+        if (course.state === 'approved') {
+            const isPrerequisiteForCompletedCourse = careerData.courses.some(dependentCourse => 
+                dependentCourse.prerequisites.includes(courseId) &&
+                (dependentCourse.state === 'approved' || dependentCourse.state === 'failed')
+            );
+
+            if (isPrerequisiteForCompletedCourse) {
+                showGlobalNotification("No se puede desaprobar: es prerrequisito de un ramo ya cursado.", "error");
+                return;
+            }
+        }
+
         if (course.state === 'approved' || course.state === 'failed') {
             course.state = 'available';
             course.approved = false;
             course.grade = null;
         } 
-        // If it's available, mark it as approved
         else if (course.state === 'available') {
             course.state = 'approved';
             course.approved = true;
-            // Calculate presentation grade as the final grade when manually approved
             const { presentationGrade } = calculateCourseGrades(course);
             course.grade = presentationGrade;
         }
@@ -536,7 +563,6 @@
         document.getElementById('grade-categories-container').innerHTML = '';
         renderRecentColors();
         
-        // Populate semester dropdown
         const semesterSelect = document.getElementById('course-semester');
         semesterSelect.innerHTML = '';
         for (let i = 1; i <= displayedSemesters; i++) {
@@ -625,7 +651,10 @@
             const course = careerData.courses.find(c => c.id === hiddenId);
             Object.assign(course, courseDataPayload);
         } else {
-            if (careerData.courses.some(c => c.id === id)) { alert("Error: La sigla del ramo ya existe."); return; }
+            if (careerData.courses.some(c => c.id === id)) { 
+                showGlobalNotification("Error: La sigla del ramo ya existe.", "error");
+                return; 
+            }
             careerData.courses.push({ ...courseDataPayload, state: 'available' });
         }
         closeCourseModal();
@@ -797,6 +826,13 @@
         examFieldset.classList.toggle('hidden', !needsExam);
         document.getElementById('exam-presentation-display').textContent = presentationGrade?.toFixed(1) || 'N/A';
 
+        if (course && !needsExam) {
+            course.grade = presentationGrade;
+            course.state = 'approved';
+            course.approved = true;
+            renderGrid();
+        }
+
         // Calcular nota final con examen
         const examGrade = parseFloat(document.getElementById('exam-grade').value);
         const examWeight = parseFloat(document.getElementById('exam-weight').value);
@@ -834,7 +870,35 @@
         }
     }
 
-    // --- MANEJADORES DE EVENTOS ---
+    // --- MANEJADORES DE EVENTOS Y UTILIDADES ---
+    function showGlobalNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.className = 'global-notification';
+        notification.textContent = message;
+
+        if (type === 'error') {
+            notification.classList.add('bg-red-500');
+        } else {
+            notification.classList.add('bg-blue-500');
+        }
+
+        document.body.appendChild(notification);
+        
+        // Trigger fade in
+        setTimeout(() => {
+            notification.classList.add('show');
+        }, 10);
+
+        // Trigger fade out
+        setTimeout(() => {
+            notification.classList.remove('show');
+            // Remove from DOM after transition
+            setTimeout(() => {
+                document.body.removeChild(notification);
+            }, 300);
+        }, 3000);
+    }
+
     const handleDragStart = (e) => { draggedCourseId = e.target.closest('.course-card').id; e.target.classList.add('dragging'); };
     const handleDragEnd = (e) => { e.target.classList.remove('dragging'); draggedCourseId = null; };
     function handleDrop(e) {
@@ -914,7 +978,7 @@
         });
     }
 
-    // --- GEMINI API (sin cambios) ---
+    // --- GEMINI API ---
     async function suggestGradeStructure() {
         const courseName = document.getElementById('course-name').value;
         const courseCredits = document.getElementById('course-credits').value;
@@ -922,7 +986,7 @@
         const button = document.getElementById('gemini-suggest-btn');
 
         if (!courseName || !courseCredits) {
-            alert("Por favor, ingresa el nombre y los créditos del ramo primero.");
+            showGlobalNotification("Ingresa el nombre y los créditos del ramo primero.", "error");
             return;
         }
 
@@ -949,7 +1013,7 @@
             } else { throw new Error("Respuesta inesperada de la API."); }
         } catch (error) {
             console.error("Error con la API de Gemini:", error);
-            alert("No se pudo obtener la sugerencia. Por favor, inténtalo de nuevo.");
+            showGlobalNotification("No se pudo obtener la sugerencia. Inténtalo de nuevo.", "error");
         } finally {
             loader.classList.add('hidden');
             button.disabled = false;
