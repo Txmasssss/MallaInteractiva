@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planificador de Malla de Carrera Avanzado</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Colores base que serán actualizados por JavaScript */
+            --color-bg: #f3f4f6;
+            --color-surface: #ffffff;
+            --color-text-primary: #111827;
+            --color-text-secondary: #4b5563;
+            --color-border: #e5e7eb;
+            --color-accent: #4f46e5;
+            --color-accent-hover: #4338ca;
+            --color-accent-text: #ffffff;
+            
+            /* Colores de estado */
+            --color-approved-bg: #dcfce7;
+            --color-approved-text: #166534;
+            --color-failed-bg: #fee2e2;
+            --color-failed-text: #991b1b;
+            --color-locked-bg: #e5e7eb;
+            --color-locked-text: #6b7280;
+        }
+
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: var(--color-bg);
+            color: var(--color-text-primary);
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .semester-column { min-height: 350px; display: flex; flex-direction: column; }
+        .course-card { transition: all 0.2s ease-in-out; position: relative; border-left-width: 5px; }
+        .course-card.can-drag { cursor: grab; }
+        .course-card.can-drag:active { cursor: grabbing; transform: scale(1.05); z-index: 10; }
+        .dragging { opacity: 0.5; }
+        .modal-backdrop {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.7); display: flex;
+            justify-content: center; align-items: flex-start;
+            z-index: 50; overflow-y: auto; padding-top: 2rem; padding-bottom: 2rem;
+        }
+        .highlight-selected { transform: scale(1.03); box-shadow: 0 0 15px var(--color-accent); }
+        .highlight-prereq { box-shadow: 0 0 10px #22c55e; }
+        .highlight-dependent { box-shadow: 0 0 10px #a855f7; }
+        .card-actions {
+            position: absolute; top: 4px; right: 4px; display: flex;
+            gap: 4px; opacity: 0; transition: opacity 0.2s;
+        }
+        .course-card:hover .card-actions { opacity: 1; }
+        .action-btn { border-radius: 99px; padding: 2px; cursor: pointer; }
+        .delete-semester-btn {
+            position: absolute; top: -8px; right: -8px; background-color: #fee2e2; color: #ef4444;
+            border-radius: 99px; width: 24px; height: 24px; display: flex; align-items: center;
+            justify-content: center; cursor: pointer; font-weight: bold; border: 2px solid white;
+        }
+        .delete-semester-btn:hover { background-color: #fca5a5; }
+        .recent-color {
+            width: 24px; height: 24px; border-radius: 50%; cursor: pointer;
+            border: 2px solid var(--color-border);
+        }
+        .prereq-item { cursor: pointer; padding: 0.25rem 0.5rem; border-radius: 0.25rem; }
+        .loader {
+            border: 4px solid #f3f3f3; border-top: 4px solid var(--color-accent);
+            border-radius: 50%; width: 24px; height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="flex justify-between items-center mb-8">
+            <div class="text-left">
+                <h1 class="text-3xl md:text-4xl font-bold" style="color: var(--color-text-primary);">Planificador de Malla</h1>
+                <p class="text-md mt-2" style="color: var(--color-text-secondary);">Construye tu malla, define tus ramos y calcula tus notas.</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <label for="theme-color-picker" class="text-sm font-medium" style="color: var(--color-text-secondary);">Tema</label>
+                <input type="color" id="theme-color-picker" value="#d1d5db" class="w-10 h-10 p-0 border-none rounded-full cursor-pointer" style="background-color: transparent;">
+            </div>
+        </header>
+
+        <div class="rounded-xl shadow-md p-6 mb-8" style="background-color: var(--color-surface);">
+            <div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4">
+                <input type="text" id="career-title-input" class="text-xl font-bold bg-transparent focus:bg-[var(--color-bg)] rounded-lg p-1 -m-1 w-full md:w-auto" style="color: var(--color-text-primary);" value="Progreso de la Carrera">
+                <div class="flex gap-2 flex-shrink-0">
+                    <button id="add-semester-btn" class="text-white font-bold py-2 px-4 rounded-lg transition-colors" style="background-color: var(--color-accent); color: var(--color-accent-text);">+ Añadir Semestre</button>
+                    <button id="add-course-btn" class="font-bold py-2 px-4 rounded-lg transition-colors" style="background-color: var(--color-accent); color: var(--color-accent-text);">+ Agregar Ramo</button>
+                </div>
+            </div>
+            <div class="w-full rounded-full h-6" style="background-color: var(--color-bg);"><div id="progress-bar" class="h-6 rounded-full text-center text-white text-sm font-medium leading-6" style="width: 0%; background-color: var(--color-accent);"><span id="progress-text">0%</span></div></div>
+            <p id="credits-text" class="text-center mt-2" style="color: var(--color-text-secondary);">0 de 0 créditos aprobados.</p>
+
+            <details class="mt-4">
+                <summary class="font-semibold cursor-pointer" style="color: var(--color-text-secondary);">Calculadora de notas para exámen</summary>
+                <div class="mt-2 p-4 border rounded-lg space-y-4" style="border-color: var(--color-border);">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="exam-calc-pres-nota" class="block text-sm font-medium" style="color: var(--color-text-secondary);">Nota Presentación</label>
+                            <input type="number" id="exam-calc-pres-nota" step="0.1" class="w-full p-2 mt-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border); color: var(--color-text-primary);">
+                        </div>
+                        <div>
+                            <label for="exam-calc-pres-pct" class="block text-sm font-medium" style="color: var(--color-text-secondary);">% Ponderación Presentación</label>
+                            <input type="number" id="exam-calc-pres-pct" class="w-full p-2 mt-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border); color: var(--color-text-primary);">
+                        </div>
+                        <div>
+                            <label for="exam-calc-aprob" class="block text-sm font-medium" style="color: var(--color-text-secondary);">Nota Aprobación</label>
+                            <input type="number" id="exam-calc-aprob" step="0.1" value="4.0" class="w-full p-2 mt-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border); color: var(--color-text-primary);">
+                        </div>
+                        <div>
+                            <label for="exam-calc-exam-pct" class="block text-sm font-medium" style="color: var(--color-text-secondary);">% Ponderación Examen</label>
+                            <input type="number" id="exam-calc-exam-pct" class="w-full p-2 mt-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border); color: var(--color-text-primary);">
+                        </div>
+                    </div>
+                    <p id="exam-calc-pct-error" class="text-red-500 text-xs mt-1 hidden">Las ponderaciones deben sumar 100%.</p>
+                    <button id="exam-calculate-btn" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Calcular Nota de Examen</button>
+                    <div id="exam-calc-result" class="text-center font-bold text-lg p-4 rounded-md hidden" style="background-color: var(--color-bg);"></div>
+                </div>
+            </details>
+        </div>
+        <div id="career-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+    </div>
+
+    <div id="course-modal" class="modal-backdrop hidden">
+        <div class="rounded-xl shadow-2xl p-6 md:p-8 w-11/12 md:w-3/4 lg:w-2/3 max-w-4xl" style="background-color: var(--color-surface); color: var(--color-text-primary);">
+            <h2 id="modal-title" class="text-2xl font-bold mb-6"></h2>
+            <form id="course-form" class="space-y-6">
+                <input type="hidden" id="course-id-hidden">
+                <fieldset class="border p-4 rounded-lg" style="border-color: var(--color-border);">
+                    <legend class="px-2 font-semibold" style="color: var(--color-text-secondary);">Información Básica</legend>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div><label for="course-id" class="block text-sm font-medium" style="color: var(--color-text-secondary);">Sigla (ID)</label><input type="text" id="course-id" class="w-full p-2 mt-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border);" required></div>
+                        <div><label for="course-name" class="block text-sm font-medium" style="color: var(--color-text-secondary);">Nombre del Ramo</label><input type="text" id="course-name" class="w-full p-2 mt-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border);" required></div>
+                        <div><label for="course-credits" class="block text-sm font-medium" style="color: var(--color-text-secondary);">Créditos</label><input type="number" id="course-credits" min="1" class="w-full p-2 mt-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border);" required></div>
+                        <div>
+                            <label for="course-semester" class="block text-sm font-medium" style="color: var(--color-text-secondary);">Semestre</label>
+                            <select id="course-semester" class="w-full p-2 mt-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border);"></select>
+                        </div>
+                        <div class="md:col-span-2">
+                            <label for="course-color" class="block text-sm font-medium" style="color: var(--color-text-secondary);">Color</label>
+                            <input type="color" id="course-color" class="w-full h-10 p-1 mt-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border);">
+                        </div>
+                        <div class="md:col-span-2">
+                             <label class="block text-sm font-medium" style="color: var(--color-text-secondary);">Colores Recientes</label>
+                             <div id="recent-colors-container" class="flex gap-2 mt-2 h-10 items-center"></div>
+                        </div>
+                    </div>
+                </fieldset>
+
+                <fieldset class="border p-4 rounded-lg" style="border-color: var(--color-border);">
+                    <legend class="px-2 font-semibold" style="color: var(--color-text-secondary);">Prerrequisitos</legend>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <h4 class="font-medium text-sm" style="color: var(--color-text-secondary);">Ramos Disponibles</h4>
+                            <div id="available-prereqs" class="h-40 overflow-y-auto border rounded-md p-2 mt-1 space-y-1" style="background-color: rgba(128,128,128,0.1); border-color: var(--color-border);"></div>
+                        </div>
+                        <div>
+                            <h4 class="font-medium text-sm" style="color: var(--color-text-secondary);">Prerrequisitos Seleccionados</h4>
+                            <div id="selected-prereqs" class="h-40 overflow-y-auto border rounded-md p-2 mt-1 space-y-1" style="background-color: rgba(128,128,128,0.1); border-color: var(--color-border);"></div>
+                        </div>
+                    </div>
+                </fieldset>
+
+                <fieldset class="border p-4 rounded-lg" style="border-color: var(--color-border);">
+                    <legend class="px-2 font-semibold" style="color: var(--color-text-secondary);">Estructura de Calificaciones</legend>
+                    <div id="gemini-button-container" class="flex items-center gap-4 mb-4">
+                        <button type="button" id="gemini-suggest-btn" class="bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold py-2 px-3 rounded-lg flex items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-stars" viewBox="0 0 16 16"><path d="M7.657 6.247c.11-.33.576-.33.686 0l.645 1.937a2.89 2.89 0 0 0 1.829 1.828l1.936.645c.33.11.33.576 0 .686l-1.937.645a2.89 2.89 0 0 0-1.828 1.829l-.645 1.936a.361.361 0 0 1-.686 0l-.645-1.937a2.89 2.89 0 0 0-1.828-1.828l-1.937-.645a.361.361 0 0 1 0-.686l1.937-.645a2.89 2.89 0 0 0 1.828-1.828zM3.794 1.148a.217.217 0 0 1 .412 0l.387 1.162c.173.518.579.924 1.097 1.097l1.162.387a.217.217 0 0 1 0 .412l-1.162.387A1.73 1.73 0 0 0 4.593 5.9l-.387 1.162a.217.217 0 0 1-.412 0L3.407 5.9A1.73 1.73 0 0 0 2.31 4.807L1.148 4.42a.217.217 0 0 1 0-.412l1.162-.387A1.73 1.73 0 0 0 3.407 2.31zM10.863.099a.145.145 0 0 1 .274 0l.258.774c.115.346.386.617.732.732l.774.258a.145.145 0 0 1 0 .274l-.774.258a1.16 1.16 0 0 0-.732.732l-.258.774a.145.145 0 0 1-.274 0l-.258-.774a1.16 1.16 0 0 0-.732-.732L9.1 2.137a.145.145 0 0 1 0-.274l.774-.258c.346-.115.617-.386.732-.732z"/></svg>
+                            Sugerir Estructura con IA
+                        </button>
+                        <div id="gemini-loader" class="loader hidden"></div>
+                    </div>
+                    <div id="grade-categories-container" class="space-y-4"></div>
+                    <button type="button" id="add-grade-category-btn" class="mt-4 bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold py-2 px-3 rounded-lg">+ Agregar Categoría</button>
+                </fieldset>
+
+                <fieldset class="border p-4 rounded-lg" style="border-color: var(--color-border);">
+                    <legend class="px-2 font-semibold" style="color: var(--color-text-secondary);">Reglas de Aprobación y Resultados</legend>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                        <div><label for="exemption-grade" class="block text-sm font-medium" style="color: var(--color-text-secondary);">Nota para Eximirse sin Rojos</label><input type="number" id="exemption-grade" step="0.1" class="w-full p-2 mt-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border);"></div>
+                        <div><label for="red-note-condition" class="block text-sm font-medium" style="color: var(--color-text-secondary);">Nota para Eximirse si hay Rojos</label><input type="number" id="red-note-condition" step="0.1" class="w-full p-2 mt-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border);"></div>
+                        <div id="course-results" class="p-2 rounded-lg text-center" style="background-color: var(--color-bg);">
+                            <p class="text-sm">Nota Presentación: <strong id="presentation-grade-display">N/A</strong></p>
+                            <p id="exemption-status-display" class="text-sm font-bold mt-1">Calculando...</p>
+                        </div>
+                    </div>
+                </fieldset>
+
+                <fieldset id="exam-details-fieldset" class="border p-4 rounded-lg hidden" style="border-color: var(--color-border);">
+                    <legend class="px-2 font-semibold" style="color: var(--color-text-secondary);">Datos Examen</legend>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
+                        <div>
+                            <label for="exam-grade" class="block text-sm font-medium" style="color: var(--color-text-secondary);">Nota Examen</label>
+                            <input type="number" id="exam-grade" step="0.1" class="w-full p-2 mt-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border);">
+                        </div>
+                        <div>
+                            <label for="exam-weight" class="block text-sm font-medium" style="color: var(--color-text-secondary);">% Ponderación Examen</label>
+                            <input type="number" id="exam-weight" class="w-full p-2 mt-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border);">
+                        </div>
+                        <div class="p-2 rounded-lg text-center" style="background-color: var(--color-bg);">
+                             <p class="text-sm">Nota Presentación: <strong id="exam-presentation-display">N/A</strong></p>
+                        </div>
+                         <div class="p-2 rounded-lg text-center font-bold text-lg" style="background-color: var(--color-bg);">
+                             <p id="final-grade-display">Nota Final: N/A</p>
+                             <p id="exam-final-status" class="text-sm font-bold mt-1"></p>
+                        </div>
+                    </div>
+                </fieldset>
+
+                <div class="flex items-center justify-end gap-4 pt-4">
+                    <button id="cancel-btn" type="button" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg">Cancelar</button>
+                    <button id="save-btn" type="submit" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Guardar Ramo</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <footer class="text-center py-8">
+        <p class="text-xs" style="color: var(--color-text-secondary);">Creado por A.C Y T.O</p>
+    </footer>
+
+    <script>
+    // --- MODELO DE DATOS ---
+    let careerData = {
+        name: "Progreso de mi Carrera",
+        courses: [],
+        recentlyUsedColors: []
+    };
+    let displayedSemesters = 0;
+    let draggedCourseId = null;
+
+    // --- REFERENCIAS AL DOM ---
+    const grid = document.getElementById('career-grid');
+    const modal = document.getElementById('course-modal');
+    const courseForm = document.getElementById('course-form');
+    const themeColorPicker = document.getElementById('theme-color-picker');
+
+    // --- LÓGICA DE PERSISTENCIA DE DATOS ---
+    function saveData() {
+        localStorage.setItem('careerPlannerData', JSON.stringify(careerData));
+        localStorage.setItem('careerPlannerSemesters', displayedSemesters);
+        localStorage.setItem('careerPlannerTheme', themeColorPicker.value);
+    }
+
+    function loadData() {
+        const savedData = localStorage.getItem('careerPlannerData');
+        const savedSemesters = localStorage.getItem('careerPlannerSemesters');
+        const savedTheme = localStorage.getItem('careerPlannerTheme');
+
+        if (savedData) {
+            careerData = JSON.parse(savedData);
+            if (!careerData.recentlyUsedColors) {
+                careerData.recentlyUsedColors = [];
+            }
+        }
+        if (savedSemesters) {
+            displayedSemesters = parseInt(savedSemesters, 10);
+        }
+        if (savedTheme) {
+            themeColorPicker.value = savedTheme;
+        }
+    }
+
+    // --- LÓGICA DE TEMA DINÁMICO ---
+    function hexToRgb(hex) {
+        let result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : null;
+    }
+
+    function rgbToHsl(r, g, b) {
+        r /= 255, g /= 255, b /= 255;
+        let max = Math.max(r, g, b), min = Math.min(r, g, b);
+        let h, s, l = (max + min) / 2;
+        if (max == min) { h = s = 0; } 
+        else {
+            let d = max - min;
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            switch(max) {
+                case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                case g: h = (b - r) / d + 2; break;
+                case b: h = (r - g) / d + 4; break;
+            }
+            h /= 6;
+        }
+        return { h: h * 360, s: s * 100, l: l * 100 };
+    }
+
+    function isColorLight(hexColor) {
+        const rgb = hexToRgb(hexColor);
+        if (!rgb) return true;
+        const luminance = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+        return luminance > 128;
+    }
+
+    function updateTheme(baseColor) {
+        const root = document.documentElement;
+        const rgb = hexToRgb(baseColor);
+        if (!rgb) return;
+
+        const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+        const isLight = isColorLight(baseColor);
+
+        if (isLight) {
+            root.style.setProperty('--color-bg', `hsl(${hsl.h}, ${hsl.s}%, 96%)`);
+            root.style.setProperty('--color-surface', `hsl(${hsl.h}, ${hsl.s}%, 99%)`);
+            root.style.setProperty('--color-border', `hsl(${hsl.h}, ${hsl.s}%, 90%)`);
+            root.style.setProperty('--color-text-primary', `hsl(${hsl.h}, ${hsl.s}%, 10%)`);
+            root.style.setProperty('--color-text-secondary', `hsl(${hsl.h}, ${hsl.s}%, 35%)`);
+            root.style.setProperty('--color-accent', baseColor);
+            root.style.setProperty('--color-accent-text', `hsl(${hsl.h}, ${hsl.s}%, 10%)`);
+            
+            root.style.setProperty('--color-approved-bg', '#dcfce7');
+            root.style.setProperty('--color-approved-text', '#166534');
+            root.style.setProperty('--color-failed-bg', '#fee2e2');
+            root.style.setProperty('--color-failed-text', '#991b1b');
+            root.style.setProperty('--color-locked-bg', '#e5e7eb');
+            root.style.setProperty('--color-locked-text', '#6b7280');
+        } else {
+            root.style.setProperty('--color-bg', `hsl(${hsl.h}, ${hsl.s}%, 8%)`);
+            root.style.setProperty('--color-surface', `hsl(${hsl.h}, ${hsl.s}%, 12%)`);
+            root.style.setProperty('--color-border', `hsl(${hsl.h}, ${hsl.s}%, 20%)`);
+            root.style.setProperty('--color-text-primary', `hsl(${hsl.h}, ${hsl.s}%, 95%)`);
+            root.style.setProperty('--color-text-secondary', `hsl(${hsl.h}, ${hsl.s}%, 65%)`);
+            root.style.setProperty('--color-accent', baseColor);
+            root.style.setProperty('--color-accent-text', `hsl(${hsl.h}, ${hsl.s}%, 95%)`);
+
+            root.style.setProperty('--color-approved-bg', 'rgba(74, 222, 128, 0.2)');
+            root.style.setProperty('--color-approved-text', '#bbf7d0');
+            root.style.setProperty('--color-failed-bg', 'rgba(239, 68, 68, 0.2)');
+            root.style.setProperty('--color-failed-text', '#fca5a5');
+            root.style.setProperty('--color-locked-bg', '#374151');
+            root.style.setProperty('--color-locked-text', '#9ca3af');
+        }
+    }
+
+    // --- LÓGICA DE ESTADO Y RENDERIZADO ---
+    function updateAllCourseStates() {
+        const courseMap = new Map(careerData.courses.map(c => [c.id, c]));
+        careerData.courses.forEach(course => {
+            if (course.state === 'approved' || course.state === 'failed') return;
+            
+            let prereqsMet = course.prerequisites.every(pId => {
+                const prereq = courseMap.get(pId);
+                return prereq?.state === 'approved';
+            });
+            course.state = prereqsMet ? 'available' : 'locked';
+        });
+    }
+
+    function renderGrid() {
+        grid.innerHTML = '';
+        if (displayedSemesters === 0 && careerData.courses.length === 0) displayedSemesters = 4;
+        else if (careerData.courses.length > 0) displayedSemesters = Math.max(...careerData.courses.map(c => c.semester), displayedSemesters, 1);
+
+        updateAllCourseStates();
+
+        for (let i = 1; i <= displayedSemesters; i++) {
+            const semesterCol = document.createElement('div');
+            semesterCol.id = `semester-${i}`;
+            semesterCol.className = 'rounded-xl shadow p-4 semester-column';
+            semesterCol.style.backgroundColor = 'var(--color-surface)';
+            semesterCol.dataset.semester = i;
+            
+            const header = document.createElement('div');
+            header.className = 'semester-header relative border-b pb-2 mb-4';
+            header.style.borderColor = 'var(--color-border)';
+            const title = document.createElement('h3');
+            title.className = 'font-bold text-lg';
+            title.textContent = `Semestre ${i}`;
+            header.appendChild(title);
+            
+            if (careerData.courses.filter(c => c.semester === i).length === 0) {
+                const deleteBtn = document.createElement('div');
+                deleteBtn.className = 'delete-semester-btn';
+                deleteBtn.innerHTML = '&times;';
+                deleteBtn.title = 'Eliminar semestre';
+                deleteBtn.onclick = () => removeSemester(i);
+                header.appendChild(deleteBtn);
+            }
+            semesterCol.appendChild(header);
+            
+            const coursesContainer = document.createElement('div');
+            coursesContainer.className = 'space-y-3 flex-grow';
+            semesterCol.appendChild(coursesContainer);
+
+            const semesterCredits = careerData.courses
+                .filter(c => c.semester === i)
+                .reduce((sum, c) => sum + (c.credits || 0), 0);
+
+            const creditsFooter = document.createElement('div');
+            creditsFooter.className = 'text-center text-sm pt-3 mt-auto border-t';
+            creditsFooter.style.borderColor = 'var(--color-border)';
+            creditsFooter.style.color = 'var(--color-text-secondary)';
+            creditsFooter.textContent = `Créditos: ${semesterCredits}`;
+            semesterCol.appendChild(creditsFooter);
+
+            grid.appendChild(semesterCol);
+        }
+
+        careerData.courses.forEach(course => {
+            const courseCard = createCourseCard(course);
+            const semesterCol = grid.querySelector(`#semester-${course.semester} > .flex-grow`);
+            if (semesterCol) semesterCol.appendChild(courseCard);
+        });
+
+        addDropListeners();
+        updateProgress();
+        saveData();
+    }
+
+    function createCourseCard(course) {
+        const card = document.createElement('div');
+        card.id = course.id;
+        card.className = 'course-card p-3 rounded-lg shadow-sm can-drag'; 
+
+        switch(course.state) {
+            case 'approved':
+                card.style.backgroundColor = 'var(--color-approved-bg)';
+                card.style.color = 'var(--color-approved-text)';
+                break;
+            case 'failed':
+                card.style.backgroundColor = 'var(--color-failed-bg)';
+                card.style.color = 'var(--color-failed-text)';
+                card.classList.remove('can-drag');
+                break;
+            case 'locked':
+                card.style.backgroundColor = 'var(--color-locked-bg)';
+                card.style.color = 'var(--color-locked-text)';
+                break;
+            case 'available':
+                card.style.backgroundColor = 'var(--color-surface)';
+                card.style.color = 'var(--color-text-primary)';
+                break;
+        }
+        card.draggable = course.state !== 'failed';
+        card.style.borderColor = course.color || 'transparent';
+
+        const name = document.createElement('p');
+        name.className = 'font-semibold text-sm pr-12';
+        name.textContent = course.name;
+
+        const details = document.createElement('p');
+        details.className = 'text-xs opacity-80';
+        details.textContent = `${course.id} - ${course.credits} créditos`;
+
+        if ((course.state === 'approved' || course.state === 'failed') && typeof course.grade === 'number') {
+            const gradeP = document.createElement('p');
+            gradeP.className = 'font-bold text-sm mt-1';
+            gradeP.textContent = `Nota Final: ${course.grade.toFixed(1)}`;
+            details.appendChild(gradeP);
+        }
+
+        card.appendChild(createCardActions(course));
+        card.appendChild(name);
+        card.appendChild(details);
+
+        if (course.state === 'available') {
+            card.addEventListener('dblclick', () => toggleApproved(course.id));
+        }
+        
+        if (card.draggable) {
+            card.addEventListener('dragstart', handleDragStart);
+            card.addEventListener('dragend', handleDragEnd);
+        }
+        card.addEventListener('mouseover', () => highlightDependencies(course.id));
+        card.addEventListener('mouseout', clearHighlights);
+        return card;
+    }
+
+    function createCardActions(course) {
+        const actions = document.createElement('div');
+        actions.className = 'card-actions';
+        const editBtn = document.createElement('div');
+        editBtn.className = 'action-btn border hover:opacity-80';
+        editBtn.style.backgroundColor = 'var(--color-surface)';
+        editBtn.style.borderColor = 'var(--color-border)';
+        editBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="color: var(--color-text-secondary);"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207z"/></svg>`;
+        editBtn.onclick = (e) => { e.stopPropagation(); openCourseModal(course.id); };
+        actions.appendChild(editBtn);
+
+        if (!careerData.courses.some(c => c.prerequisites.includes(course.id))) {
+            const deleteBtn = document.createElement('div');
+            deleteBtn.className = 'action-btn border hover:opacity-80';
+            deleteBtn.style.backgroundColor = 'var(--color-surface)';
+            deleteBtn.style.borderColor = 'var(--color-border)';
+            deleteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="color: var(--color-text-secondary);"><path d="M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8z"/></svg>`;
+            deleteBtn.onclick = (e) => { e.stopPropagation(); deleteCourse(course.id); };
+            actions.appendChild(deleteBtn);
+        }
+        return actions;
+    }
+
+    // --- LÓGICA DE DATOS (CRUD, SEMESTRES, ETC.) ---
+    const addSemester = () => { displayedSemesters++; renderGrid(); };
+    function removeSemester(semesterNumber) {
+        careerData.courses.forEach(course => { if (course.semester > semesterNumber) course.semester--; });
+        displayedSemesters--;
+        renderGrid();
+    }
+    function deleteCourse(courseId) {
+        careerData.courses = careerData.courses.filter(c => c.id !== courseId);
+        careerData.courses.forEach(c => { c.prerequisites = c.prerequisites.filter(p => p !== courseId); });
+        renderGrid();
+    }
+    function toggleApproved(courseId) {
+        const course = careerData.courses.find(c => c.id === courseId);
+        if (course) {
+             // Si el ramo estaba reprobado, al hacer doble click lo resetea a 'available'
+            if (course.state === 'failed') {
+                course.state = 'available';
+            } else {
+                course.approved = !course.approved;
+                course.state = course.approved ? 'approved' : 'available';
+            }
+            
+            if (course.state === 'approved') {
+                const { presentationGrade } = calculateCourseGrades(course);
+                course.grade = presentationGrade;
+            } else {
+                course.grade = null;
+            }
+            renderGrid();
+        }
+    }
+
+    // --- LÓGICA DEL MODAL Y FORMULARIO AVANZADO ---
+    function openCourseModal(courseId = null) {
+        courseForm.reset();
+        document.getElementById('grade-categories-container').innerHTML = '';
+        renderRecentColors();
+        
+        // Populate semester dropdown
+        const semesterSelect = document.getElementById('course-semester');
+        semesterSelect.innerHTML = '';
+        for (let i = 1; i <= displayedSemesters; i++) {
+            const option = document.createElement('option');
+            option.value = i;
+            option.textContent = `Semestre ${i}`;
+            semesterSelect.appendChild(option);
+        }
+
+        let currentPrereqs = new Set();
+        if (courseId) {
+            const course = careerData.courses.find(c => c.id === courseId);
+            document.getElementById('modal-title').textContent = 'Editar Ramo';
+            document.getElementById('course-id-hidden').value = course.id;
+            document.getElementById('course-id').value = course.id;
+            document.getElementById('course-id').readOnly = true;
+            document.getElementById('course-name').value = course.name;
+            document.getElementById('course-credits').value = course.credits;
+            document.getElementById('course-color').value = course.color || '#000000';
+            document.getElementById('course-semester').value = course.semester;
+            document.getElementById('exemption-grade').value = course.exemptionRules?.exemptionGrade || '';
+            document.getElementById('red-note-condition').value = course.exemptionRules?.redNoteCondition || '';
+            document.getElementById('exam-grade').value = course.examGrade || '';
+            document.getElementById('exam-weight').value = course.examWeight || '';
+            currentPrereqs = new Set(course.prerequisites);
+            course.gradeStructure?.forEach(cat => renderGradeCategory(cat));
+        } else {
+            document.getElementById('modal-title').textContent = 'Agregar Nuevo Ramo';
+            document.getElementById('course-id-hidden').value = '';
+            document.getElementById('course-id').readOnly = false;
+        }
+
+        populatePrerequisitePickers(courseId, currentPrereqs);
+        updateCalculationsInModal();
+        modal.classList.remove('hidden');
+    }
+
+    const closeCourseModal = () => modal.classList.add('hidden');
+
+    function handleFormSubmit(e) {
+        e.preventDefault();
+        const hiddenId = document.getElementById('course-id-hidden').value;
+        const id = document.getElementById('course-id').value.toUpperCase();
+
+        const gradeStructure = [];
+        document.querySelectorAll('.grade-category').forEach(catDiv => {
+            const category = {
+                id: catDiv.dataset.id,
+                name: catDiv.querySelector('.category-name').value,
+                weight: parseFloat(catDiv.querySelector('.category-weight').value) || 0,
+                items: []
+            };
+            catDiv.querySelectorAll('.grade-item').forEach(itemDiv => {
+                category.items.push({
+                    id: itemDiv.dataset.id,
+                    name: itemDiv.querySelector('.item-name').value,
+                    weight: parseFloat(itemDiv.querySelector('.item-weight').value) || 0,
+                    grade: parseFloat(itemDiv.querySelector('.item-grade').value) || null
+                });
+            });
+            gradeStructure.push(category);
+        });
+
+        const color = document.getElementById('course-color').value;
+        addRecentColor(color);
+
+        const selectedPrereqs = Array.from(document.getElementById('selected-prereqs').children).map(el => el.dataset.id);
+
+        const courseDataPayload = {
+            id,
+            name: document.getElementById('course-name').value,
+            credits: parseInt(document.getElementById('course-credits').value),
+            semester: parseInt(document.getElementById('course-semester').value),
+            prerequisites: selectedPrereqs,
+            color: color,
+            gradeStructure,
+            exemptionRules: {
+                exemptionGrade: parseFloat(document.getElementById('exemption-grade').value) || null,
+                redNoteCondition: parseFloat(document.getElementById('red-note-condition').value) || null
+            },
+            examGrade: parseFloat(document.getElementById('exam-grade').value) || null,
+            examWeight: parseFloat(document.getElementById('exam-weight').value) || null
+        };
+
+        if (hiddenId) {
+            const course = careerData.courses.find(c => c.id === hiddenId);
+            Object.assign(course, courseDataPayload);
+        } else {
+            if (careerData.courses.some(c => c.id === id)) { alert("Error: La sigla del ramo ya existe."); return; }
+            careerData.courses.push({ ...courseDataPayload, state: 'available' });
+        }
+        closeCourseModal();
+        renderGrid();
+    }
+
+    // --- LÓGICA DE RENDERIZADO DINÁMICO DEL MODAL ---
+    function renderGradeCategory(category = {}) {
+        const catId = category.id || `cat-${Date.now()}`;
+        const container = document.getElementById('grade-categories-container');
+        const catDiv = document.createElement('div');
+        catDiv.className = 'grade-category border p-3 rounded-md space-y-2';
+        catDiv.style.borderColor = 'var(--color-border)';
+        catDiv.dataset.id = catId;
+
+        catDiv.innerHTML = `
+            <div class="flex gap-2 items-center">
+                <input type="text" placeholder="Nombre Categoría" class="category-name flex-grow p-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border);" value="${category.name || ''}">
+                <div class="flex items-center">
+                    <input type="number" placeholder="Porc" class="category-weight w-20 p-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border);" value="${category.weight || ''}">
+                    <span class="ml-1" style="color: var(--color-text-secondary);">%</span>
+                </div>
+                <button type="button" class="remove-category-btn bg-red-500 text-white rounded-full w-6 h-6 text-xs flex-shrink-0">&times;</button>
+            </div>
+            <div class="grade-items-container pl-4 border-l-2 space-y-2 mt-2" style="border-color: var(--color-border);"></div>
+            <button type="button" class="add-grade-item-btn bg-green-500 text-white text-xs font-bold py-1 px-2 rounded-md mt-2">+ Sub-categoría</button>
+        `;
+
+        container.appendChild(catDiv);
+        category.items?.forEach(item => renderGradeItem(catId, item));
+    }
+
+    function renderGradeItem(catId, item = {}) {
+        const itemId = item.id || `item-${Date.now()}`;
+        const container = document.querySelector(`.grade-category[data-id="${catId}"] .grade-items-container`);
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'grade-item flex gap-2 items-center';
+        itemDiv.dataset.id = itemId;
+
+        itemDiv.innerHTML = `
+            <input type="text" placeholder="Nombre Item" class="item-name flex-grow p-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border);" value="${item.name || ''}">
+            <div class="flex items-center">
+                <input type="number" placeholder="Porc" class="item-weight w-20 p-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border);" value="${item.weight || ''}">
+                <span class="ml-1" style="color: var(--color-text-secondary);">%</span>
+            </div>
+            <input type="number" step="0.1" placeholder="Nota" class="item-grade w-20 p-1 rounded-md border" style="background-color: var(--color-bg); border-color: var(--color-border);" value="${item.grade || ''}">
+            <button type="button" class="remove-item-btn bg-red-500 text-white rounded-full w-5 h-5 text-xs flex-shrink-0">&times;</button>
+        `;
+        container.appendChild(itemDiv);
+    }
+
+    function populatePrerequisitePickers(currentCourseId, selectedPrereqsSet) {
+        const availableContainer = document.getElementById('available-prereqs');
+        const selectedContainer = document.getElementById('selected-prereqs');
+        availableContainer.innerHTML = '';
+        selectedContainer.innerHTML = '';
+
+        careerData.courses.filter(c => c.id !== currentCourseId).forEach(course => {
+            const prereqDiv = document.createElement('div');
+            prereqDiv.dataset.id = course.id;
+            prereqDiv.textContent = `${course.name} (${course.id})`;
+            prereqDiv.className = 'prereq-item hover:opacity-80';
+
+            if (selectedPrereqsSet.has(course.id)) {
+                prereqDiv.onclick = () => movePrereq(course.id, 'available');
+                selectedContainer.appendChild(prereqDiv);
+            } else {
+                prereqDiv.onclick = () => movePrereq(course.id, 'selected');
+                availableContainer.appendChild(prereqDiv);
+            }
+        });
+    }
+
+    function movePrereq(courseId, to) {
+        const currentCourseId = document.getElementById('course-id-hidden').value;
+        const selectedPrereqs = new Set(Array.from(document.getElementById('selected-prereqs').children).map(el => el.dataset.id));
+
+        if (to === 'selected') {
+            selectedPrereqs.add(courseId);
+        } else {
+            selectedPrereqs.delete(courseId);
+        }
+        populatePrerequisitePickers(currentCourseId, selectedPrereqs);
+    }
+
+    // --- LÓGICA DE CÁLCULO DE NOTAS ---
+    function customRound(grade) {
+        if (grade === null || isNaN(grade)) return null;
+        return Math.round((grade + 0.04) * 10) / 10;
+    }
+
+    function calculateCourseGrades(courseData) {
+        let presentationGrade = 0;
+        let hasRedNote = false;
+
+        courseData.gradeStructure?.forEach(cat => {
+            let categoryGrade = 0;
+            let totalItemWeight = 0;
+            cat.items.forEach(item => {
+                if (item.grade !== null && item.weight > 0) {
+                    const roundedItemGrade = customRound(item.grade);
+                    categoryGrade += roundedItemGrade * (item.weight / 100);
+                    totalItemWeight += item.weight;
+                    if (roundedItemGrade < 4.0) hasRedNote = true;
+                }
+            });
+            if (totalItemWeight > 0 && totalItemWeight < 100) categoryGrade = (categoryGrade / totalItemWeight) * 100;
+            if (cat.weight > 0) presentationGrade += categoryGrade * (cat.weight / 100);
+        });
+
+        const finalGrade = customRound(presentationGrade);
+        return { presentationGrade: finalGrade, hasRedNote };
+    }
+
+    function updateCalculationsInModal() {
+        const currentCourseId = document.getElementById('course-id-hidden').value;
+        const course = careerData.courses.find(c => c.id === currentCourseId);
+
+        const gradeStructure = [];
+        document.querySelectorAll('.grade-category').forEach(catDiv => {
+            const category = {
+                weight: parseFloat(catDiv.querySelector('.category-weight').value) || 0,
+                items: []
+            };
+            catDiv.querySelectorAll('.grade-item').forEach(itemDiv => {
+                category.items.push({
+                    weight: parseFloat(itemDiv.querySelector('.item-weight').value) || 0,
+                    grade: parseFloat(itemDiv.querySelector('.item-grade').value) || null
+                });
+            });
+            gradeStructure.push(category);
+        });
+        const exemptionRules = {
+            exemptionGrade: parseFloat(document.getElementById('exemption-grade').value) || null,
+            redNoteCondition: parseFloat(document.getElementById('red-note-condition').value) || null
+        };
+
+        const { presentationGrade, hasRedNote } = calculateCourseGrades({ gradeStructure });
+
+        document.getElementById('presentation-grade-display').textContent = presentationGrade?.toFixed(1) || 'N/A';
+        const statusDisplay = document.getElementById('exemption-status-display');
+        const examFieldset = document.getElementById('exam-details-fieldset');
+        
+        let needsExam = true;
+
+        if (exemptionRules.exemptionGrade) {
+            if (hasRedNote && exemptionRules.redNoteCondition) {
+                if (presentationGrade >= exemptionRules.redNoteCondition) {
+                    statusDisplay.textContent = `Apruebas (Nota: ${presentationGrade.toFixed(1)})`;
+                    statusDisplay.className = 'text-sm font-bold mt-1 text-yellow-500';
+                    needsExam = false;
+                } else {
+                    statusDisplay.textContent = 'Te vas a examen';
+                    statusDisplay.className = 'text-sm font-bold mt-1 text-red-500';
+                }
+            } else if (!hasRedNote && presentationGrade >= exemptionRules.exemptionGrade) {
+                statusDisplay.textContent = 'Eximido';
+                statusDisplay.className = 'text-sm font-bold mt-1 text-green-500';
+                needsExam = false;
+            } else {
+                statusDisplay.textContent = 'Te vas a examen';
+                statusDisplay.className = 'text-sm font-bold mt-1 text-red-500';
+            }
+        } else {
+            statusDisplay.textContent = 'Define reglas de eximición';
+            statusDisplay.className = 'text-sm font-bold mt-1';
+        }
+        
+        examFieldset.classList.toggle('hidden', !needsExam);
+        document.getElementById('exam-presentation-display').textContent = presentationGrade?.toFixed(1) || 'N/A';
+
+        // Calcular nota final con examen
+        const examGrade = parseFloat(document.getElementById('exam-grade').value);
+        const examWeight = parseFloat(document.getElementById('exam-weight').value);
+        const finalGradeDisplay = document.getElementById('final-grade-display');
+        const finalStatusDisplay = document.getElementById('exam-final-status');
+
+        if (needsExam && !isNaN(examGrade) && !isNaN(examWeight) && examWeight > 0 && examWeight <= 100) {
+            const presentationWeight = 100 - examWeight;
+            const finalGrade = (presentationGrade * (presentationWeight / 100)) + (examGrade * (examWeight / 100));
+            const roundedFinalGrade = customRound(finalGrade);
+            finalGradeDisplay.textContent = `Nota Final: ${roundedFinalGrade.toFixed(1)}`;
+            
+            if (roundedFinalGrade >= 4.0) {
+                finalStatusDisplay.textContent = "Aprobado";
+                finalStatusDisplay.className = 'text-sm font-bold mt-1 text-green-500';
+            } else {
+                finalStatusDisplay.textContent = "Reprobado";
+                finalStatusDisplay.className = 'text-sm font-bold mt-1 text-red-500';
+            }
+
+            if (course) {
+                course.grade = roundedFinalGrade;
+                if (roundedFinalGrade >= 4.0) {
+                    course.state = 'approved';
+                    course.approved = true;
+                } else {
+                    course.state = 'failed';
+                    course.approved = false;
+                }
+                renderGrid();
+            }
+        } else {
+            finalGradeDisplay.textContent = 'Nota Final: N/A';
+            finalStatusDisplay.textContent = '';
+        }
+    }
+
+    // --- MANEJADORES DE EVENTOS ---
+    const handleDragStart = (e) => { draggedCourseId = e.target.closest('.course-card').id; e.target.classList.add('dragging'); };
+    const handleDragEnd = (e) => { e.target.classList.remove('dragging'); draggedCourseId = null; };
+    function handleDrop(e) {
+        e.preventDefault();
+        const targetSemester = e.target.closest('.semester-column')?.dataset.semester;
+        const course = careerData.courses.find(c => c.id === draggedCourseId);
+        if (course && targetSemester) { course.semester = parseInt(targetSemester); renderGrid(); }
+    }
+    const addDropListeners = () => {
+        document.querySelectorAll('.semester-column').forEach(col => {
+            col.addEventListener('dragover', e => e.preventDefault());
+            col.addEventListener('drop', handleDrop);
+        });
+    };
+    function highlightDependencies(courseId) {
+        const course = careerData.courses.find(c => c.id === courseId);
+        if (!course) return;
+        document.getElementById(courseId)?.classList.add('highlight-selected');
+        course.prerequisites.forEach(pId => document.getElementById(pId)?.classList.add('highlight-prereq'));
+        careerData.courses.filter(c => c.prerequisites.includes(courseId)).forEach(dep => document.getElementById(dep.id)?.classList.add('highlight-dependent'));
+    }
+    const clearHighlights = () => document.querySelectorAll('.course-card').forEach(c => c.classList.remove('highlight-selected', 'highlight-prereq', 'highlight-dependent'));
+    function updateProgress() {
+        const approvedCourses = careerData.courses.filter(c => c.state === 'approved');
+        const approvedCredits = approvedCourses.reduce((sum, c) => sum + (c.credits || 0), 0);
+        const totalCredits = careerData.courses.reduce((sum, c) => sum + (c.credits || 0), 0);
+        const percentage = totalCredits > 0 ? Math.round((approvedCredits / totalCredits) * 100) : 0;
+        document.getElementById('progress-bar').style.width = `${percentage}%`;
+        document.getElementById('progress-text').textContent = `${percentage}%`;
+        document.getElementById('credits-text').textContent = `${approvedCredits} de ${totalCredits} créditos aprobados.`;
+    }
+
+    function calculateNeededExamGrade() {
+        const presNota = parseFloat(document.getElementById('exam-calc-pres-nota').value);
+        const presPct = parseFloat(document.getElementById('exam-calc-pres-pct').value);
+        const notaAprob = parseFloat(document.getElementById('exam-calc-aprob').value);
+        const examPct = parseFloat(document.getElementById('exam-calc-exam-pct').value);
+        const resultDiv = document.getElementById('exam-calc-result');
+        const pctError = document.getElementById('exam-calc-pct-error');
+
+        pctError.classList.add('hidden');
+        resultDiv.classList.add('hidden');
+
+        if (isNaN(presNota) || isNaN(presPct) || isNaN(notaAprob) || isNaN(examPct)) {
+            resultDiv.textContent = 'Por favor, completa todos los campos.';
+            resultDiv.classList.remove('hidden'); return;
+        }
+        if (Math.abs(presPct + examPct - 100) > 0.1) {
+            pctError.classList.remove('hidden'); return;
+        }
+
+        const neededGrade = (notaAprob - (presNota * presPct / 100)) / (examPct / 100);
+        resultDiv.classList.remove('hidden');
+
+        if (neededGrade > 7.0) resultDiv.textContent = `Necesitas más de un 7.0 en el examen.`;
+        else if (neededGrade < 1.0) resultDiv.textContent = `¡Ya aprobaste! Necesitas menos de un 1.0.`;
+        else resultDiv.textContent = `Necesitas un ${neededGrade.toFixed(1)} en el examen para aprobar.`;
+    }
+
+    function addRecentColor(color) {
+        if (!color) return;
+        careerData.recentlyUsedColors = careerData.recentlyUsedColors.filter(c => c !== color);
+        careerData.recentlyUsedColors.unshift(color);
+        careerData.recentlyUsedColors = careerData.recentlyUsedColors.slice(0, 8);
+    }
+
+    function renderRecentColors() {
+        const container = document.getElementById('recent-colors-container');
+        container.innerHTML = '';
+        careerData.recentlyUsedColors.forEach(color => {
+            const swatch = document.createElement('div');
+            swatch.className = 'recent-color';
+            swatch.style.backgroundColor = color;
+            swatch.title = color;
+            swatch.onclick = () => { document.getElementById('course-color').value = color; };
+            container.appendChild(swatch);
+        });
+    }
+
+    // --- GEMINI API (sin cambios) ---
+    async function suggestGradeStructure() {
+        const courseName = document.getElementById('course-name').value;
+        const courseCredits = document.getElementById('course-credits').value;
+        const loader = document.getElementById('gemini-loader');
+        const button = document.getElementById('gemini-suggest-btn');
+
+        if (!courseName || !courseCredits) {
+            alert("Por favor, ingresa el nombre y los créditos del ramo primero.");
+            return;
+        }
+
+        loader.classList.remove('hidden');
+        button.disabled = true;
+
+        const prompt = `Para un curso universitario llamado '${courseName}' con ${courseCredits} créditos, sugiere una estructura de calificaciones. Incluye categorías como 'Certámenes', 'Tareas', 'Laboratorios', etc., con sus ponderaciones. Dentro de cada categoría, sugiere sub-categorías con sus ponderaciones. La suma de ponderaciones de las categorías principales debe ser 100. La suma de ponderaciones de las sub-categorías dentro de cada categoría principal también debe ser 100.`;
+        const schema = { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, weight: { type: "NUMBER" }, items: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, weight: { type: "NUMBER" } }, required: ["name", "weight"] } } }, required: ["name", "weight", "items"] } };
+        try {
+            let chatHistory = [];
+            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+            const payload = { contents: chatHistory, generationConfig: { responseMimeType: "application/json", responseSchema: schema } };
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+            const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (!response.ok) { throw new Error(`API Error: ${response.statusText}`); }
+            const result = await response.json();
+            if (result.candidates && result.candidates[0].content && result.candidates[0].content.parts) {
+                const text = result.candidates[0].content.parts[0].text;
+                const suggestedStructure = JSON.parse(text);
+                document.getElementById('grade-categories-container').innerHTML = '';
+                suggestedStructure.forEach(cat => renderGradeCategory(cat));
+                updateCalculationsInModal();
+            } else { throw new Error("Respuesta inesperada de la API."); }
+        } catch (error) {
+            console.error("Error con la API de Gemini:", error);
+            alert("No se pudo obtener la sugerencia. Por favor, inténtalo de nuevo.");
+        } finally {
+            loader.classList.add('hidden');
+            button.disabled = false;
+        }
+    }
+
+
+    // --- INICIALIZACIÓN ---
+    document.addEventListener('DOMContentLoaded', () => {
+        loadData();
+
+        updateTheme(themeColorPicker.value);
+
+        themeColorPicker.addEventListener('input', (e) => {
+            updateTheme(e.target.value);
+            saveData();
+        });
+
+        const careerTitleInput = document.getElementById('career-title-input');
+        careerTitleInput.value = careerData.name;
+        careerTitleInput.addEventListener('change', (e) => { 
+            careerData.name = e.target.value; 
+            saveData();
+        });
+        
+        document.getElementById('add-semester-btn').addEventListener('click', addSemester);
+        document.getElementById('add-course-btn').addEventListener('click', () => openCourseModal());
+        document.getElementById('cancel-btn').addEventListener('click', closeCourseModal);
+        courseForm.addEventListener('submit', handleFormSubmit);
+        document.getElementById('add-grade-category-btn').addEventListener('click', () => renderGradeCategory());
+        document.getElementById('exam-calculate-btn').addEventListener('click', calculateNeededExamGrade);
+        document.getElementById('gemini-suggest-btn').addEventListener('click', suggestGradeStructure);
+
+        modal.addEventListener('click', (e) => {
+            if (e.target.classList.contains('remove-category-btn')) e.target.closest('.grade-category').remove();
+            if (e.target.classList.contains('add-grade-item-btn')) renderGradeItem(e.target.closest('.grade-category').dataset.id);
+            if (e.target.classList.contains('remove-item-btn')) e.target.closest('.grade-item').remove();
+            updateCalculationsInModal();
+        });
+        modal.addEventListener('input', updateCalculationsInModal);
+
+        renderGrid();
+    });
+    </script>
+</body>
+</html>
