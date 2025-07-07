@@ -460,7 +460,7 @@
         card.appendChild(name);
         card.appendChild(details);
 
-        if (course.state === 'available' || course.state === 'approved') {
+        if (course.state === 'available' || course.state === 'approved' || course.state === 'failed') {
             card.addEventListener('dblclick', () => toggleApproved(course.id));
         }
         
@@ -510,23 +510,24 @@
     }
     function toggleApproved(courseId) {
         const course = careerData.courses.find(c => c.id === courseId);
-        if (course) {
-             // Si el ramo estaba reprobado, al hacer doble click lo resetea a 'available'
-            if (course.state === 'failed') {
-                course.state = 'available';
-            } else {
-                course.approved = !course.approved;
-                course.state = course.approved ? 'approved' : 'available';
-            }
-            
-            if (course.state === 'approved') {
-                const { presentationGrade } = calculateCourseGrades(course);
-                course.grade = presentationGrade;
-            } else {
-                course.grade = null;
-            }
-            renderGrid();
+        if (!course) return;
+
+        // If it's approved or failed, revert it to available
+        if (course.state === 'approved' || course.state === 'failed') {
+            course.state = 'available';
+            course.approved = false;
+            course.grade = null;
+        } 
+        // If it's available, mark it as approved
+        else if (course.state === 'available') {
+            course.state = 'approved';
+            course.approved = true;
+            // Calculate presentation grade as the final grade when manually approved
+            const { presentationGrade } = calculateCourseGrades(course);
+            course.grade = presentationGrade;
         }
+        
+        renderGrid();
     }
 
     // --- LÓGICA DEL MODAL Y FORMULARIO AVANZADO ---
