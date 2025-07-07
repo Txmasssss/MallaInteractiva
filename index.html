@@ -460,7 +460,7 @@
         card.appendChild(name);
         card.appendChild(details);
 
-        if (course.state === 'available') {
+        if (course.state === 'available' || course.state === 'approved') {
             card.addEventListener('dblclick', () => toggleApproved(course.id));
         }
         
