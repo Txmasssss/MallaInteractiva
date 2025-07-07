@@ -2,6 +2,10 @@
 
 https://txmasssss.github.io/MallaInteractiva/
 
+TUTORIAL : https://youtu.be/9-EPdAT8vUk
+
+---
+
 ¡Toma el control total de tu futuro académico!  
 **Malla Interactiva** es una aplicación todo-en-uno que permite a estudiantes universitarios visualizar, planificar y optimizar su malla curricular de forma intuitiva, interactiva y completamente personalizada.
 
