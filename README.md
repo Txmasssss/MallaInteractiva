@@ -7,7 +7,7 @@ https://txmasssss.github.io/MallaInteractiva/
 
 Olvídate de hojas de cálculo confusas o apuntes dispersos: construye tu malla, gestiona tus ramos, calcula notas y controla tu progreso hacia la graduación en una interfaz moderna y amigable.
 
-Creado por **A.C** y **T.O**.
+Creado por **Antonia C** y **Tomás O**.
 
 ---
 
