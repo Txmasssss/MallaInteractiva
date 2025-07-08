@@ -2,7 +2,6 @@
 
 https://txmasssss.github.io/MallaInteractiva/
 
-TUTORIAL : https://youtu.be/9-EPdAT8vUk
 
 ---
 
